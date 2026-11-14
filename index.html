@@ -1,0 +1,1140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SpendGuard — Interactive UI Preview</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    .tabular-nums { font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 antialiased min-h-screen">
+  <div id="app"></div>
+  <div id="toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none"></div>
+
+  <script>
+    // ---------- UTILITIES ----------
+    function esc(str) {
+      return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function fmtCurrency(cents, currency = 'USD') {
+      return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency,
+        minimumFractionDigits: 2
+      }).format((cents || 0) / 100);
+    }
+
+    function fmtDate(iso) {
+      return new Intl.DateTimeFormat('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric'
+      }).format(new Date(iso));
+    }
+
+    function fmtDateTime(iso) {
+      return new Intl.DateTimeFormat('en-US', {
+        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+      }).format(new Date(iso));
+    }
+
+    function uid(prefix = 'id') {
+      return prefix + '_' + Math.random().toString(36).slice(2, 10);
+    }
+
+    // ---------- INITIAL SANDBOX DATA ----------
+    const now = Date.now();
+    const daysAgo = (d) => new Date(now - d * 86400000).toISOString();
+
+    const state = {
+      view: 'dashboard', // 'login' | 'register' | 'dashboard' | 'expenses' | 'activity' | 'admin' | 'settings'
+      theme: localStorage.getItem('sg_preview_theme') || 'light',
+      mobileMenuOpen: false,
+      notifOpen: false,
+      currentUserId: 'u_admin',
+      departments: [
+        { id: 'd_eng', name: 'Engineering', code: 'ENG', monthlyBudgetCents: 1500000 },
+        { id: 'd_fin', name: 'Finance & Ops', code: 'FIN', monthlyBudgetCents: 800000 },
+        { id: 'd_gtm', name: 'Growth & Sales', code: 'GTM', monthlyBudgetCents: 1200000 }
+      ],
+      users: [
+        { id: 'u_admin', name: 'Elena Vance', email: 'admin@spendguard.io', role: 'ADMIN', jobTitle: 'VP of Operations', departmentId: 'd_fin', isActive: true },
+        { id: 'u_mgr', name: 'Marcus Chen', email: 'manager@spendguard.io', role: 'MANAGER', jobTitle: 'Finance Controller', departmentId: 'd_fin', isActive: true },
+        { id: 'u_mem', name: 'Alex Rivera', email: 'alex@spendguard.io', role: 'MEMBER', jobTitle: 'Senior Platform Engineer', departmentId: 'd_eng', isActive: true }
+      ],
+      expenses: [
+        {
+          id: 'exp_1',
+          title: 'AWS Production Cluster Load Test',
+          merchant: 'Amazon Web Services',
+          description: 'Temporary multi-region capacity benchmark for Q4 launch.',
+          amountCents: 142500,
+          currency: 'USD',
+          category: 'SOFTWARE',
+          status: 'APPROVED',
+          expenseDate: daysAgo(12).slice(0, 10),
+          userId: 'u_mem',
+          departmentId: 'd_eng',
+          reviewNote: 'Approved against infrastructure scale-up budget.',
+          attachments: [{ id: 'att_1', name: 'aws-invoice-oct.pdf', sizeBytes: 184320, dataUrl: null }],
+          createdAt: daysAgo(12)
+        },
+        {
+          id: 'exp_2',
+          title: 'KubeCon Flight & Hotel',
+          merchant: 'Delta Air Lines',
+          description: 'Round-trip airfare for systems architecture summit.',
+          amountCents: 89400,
+          currency: 'USD',
+          category: 'TRAVEL',
+          status: 'REIMBURSED',
+          expenseDate: daysAgo(28).slice(0, 10),
+          userId: 'u_mem',
+          departmentId: 'd_eng',
+          reviewNote: 'Reimbursed via payroll batch #42.',
+          attachments: [{ id: 'att_2', name: 'delta-itinerary.pdf', sizeBytes: 94210, dataUrl: null }],
+          createdAt: daysAgo(28)
+        },
+        {
+          id: 'exp_3',
+          title: 'Ergonomic Monitor Arm',
+          merchant: 'Herman Miller',
+          description: 'Home office workstation hardware.',
+          amountCents: 32900,
+          currency: 'USD',
+          category: 'EQUIPMENT',
+          status: 'SUBMITTED',
+          expenseDate: daysAgo(2).slice(0, 10),
+          userId: 'u_mem',
+          departmentId: 'd_eng',
+          reviewNote: null,
+          attachments: [],
+          createdAt: daysAgo(2)
+        },
+        {
+          id: 'exp_4',
+          title: 'Client Quarterly Business Dinner',
+          merchant: 'The Capital Grille',
+          description: 'Enterprise renewal dinner with 4 client stakeholders.',
+          amountCents: 46850,
+          currency: 'USD',
+          category: 'MEALS',
+          status: 'SUBMITTED',
+          expenseDate: daysAgo(3).slice(0, 10),
+          userId: 'u_mgr',
+          departmentId: 'd_gtm',
+          reviewNote: null,
+          attachments: [],
+          createdAt: daysAgo(3)
+        },
+        {
+          id: 'exp_5',
+          title: 'Figma Organization Seats',
+          merchant: 'Figma Inc.',
+          description: 'Monthly design workspace seats.',
+          amountCents: 18000,
+          currency: 'USD',
+          category: 'SOFTWARE',
+          status: 'DRAFT',
+          expenseDate: daysAgo(1).slice(0, 10),
+          userId: 'u_mem',
+          departmentId: 'd_eng',
+          reviewNote: null,
+          attachments: [],
+          createdAt: daysAgo(1)
+        }
+      ],
+      notifications: [
+        {
+          id: 'n_1',
+          userId: 'u_admin',
+          title: 'Expense Pending Review',
+          message: 'Alex Rivera submitted "Ergonomic Monitor Arm" ($329.00).',
+          isRead: false,
+          createdAt: daysAgo(1)
+        },
+        {
+          id: 'n_2',
+          userId: 'u_mgr',
+          title: 'Expense Pending Review',
+          message: 'Alex Rivera submitted "Ergonomic Monitor Arm" ($329.00).',
+          isRead: false,
+          createdAt: daysAgo(1)
+        }
+      ],
+      auditLogs: [
+        { id: 'log_1', actorId: 'u_mem', action: 'EXPENSE_SUBMITTED', entityType: 'Expense', entityId: 'exp_3', createdAt: daysAgo(1) },
+        { id: 'log_2', actorId: 'u_mgr', action: 'EXPENSE_APPROVED', entityType: 'Expense', entityId: 'exp_1', createdAt: daysAgo(10) },
+        { id: 'log_3', actorId: 'u_mgr', action: 'EXPENSE_REIMBURSED', entityType: 'Expense', entityId: 'exp_2', createdAt: daysAgo(24) }
+      ],
+      filters: {
+        search: '',
+        status: '',
+        category: '',
+        sortBy: 'createdAt',
+        auditAction: '',
+        auditScope: 'all'
+      },
+      modal: null // { type: 'expenseForm' | 'expenseDetail' | 'receiptPreview', expenseId?: string, attachment?: any }
+    };
+
+    // ---------- HELPERS ----------
+    function currentUser() {
+      return state.users.find(u => u.id === state.currentUserId) || null;
+    }
+
+    function applyTheme() {
+      document.documentElement.classList.toggle('dark', state.theme === 'dark');
+      localStorage.setItem('sg_preview_theme', state.theme);
+    }
+
+    function toast(message, tone = 'info') {
+      const container = document.getElementById('toast-container');
+      const el = document.createElement('div');
+      const dotColor = tone === 'success' ? 'bg-emerald-500' : tone === 'error' ? 'bg-rose-500' : 'bg-indigo-500';
+      el.className = 'pointer-events-auto flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-3 shadow-lg text-sm';
+      el.innerHTML = `<span class="h-2.5 w-2.5 rounded-full ${dotColor} shrink-0"></span><span class="flex-1">${esc(message)}</span>`;
+      container.appendChild(el);
+      setTimeout(() => el.remove(), 3500);
+    }
+
+    function addAudit(action, entityType, entityId) {
+      const u = currentUser();
+      state.auditLogs.unshift({
+        id: uid('log'),
+        actorId: u ? u.id : null,
+        action,
+        entityType,
+        entityId,
+        createdAt: new Date().toISOString()
+      });
+    }
+
+    function notifyUser(userId, title, message) {
+      state.notifications.unshift({
+        id: uid('n'),
+        userId,
+        title,
+        message,
+        isRead: false,
+        createdAt: new Date().toISOString()
+      });
+    }
+
+    function statusBadge(status) {
+      const map = {
+        APPROVED: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300',
+        REIMBURSED: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300',
+        SUBMITTED: 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300',
+        REJECTED: 'bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300',
+        DRAFT: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+      };
+      return `<span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${map[status] || map.DRAFT}">${esc(status)}</span>`;
+    }
+
+    // ---------- RENDERERS ----------
+    function renderAuth() {
+      const isRegister = state.view === 'register';
+      return `
+        <div class="min-h-screen flex items-center justify-center p-4">
+          <div class="w-full max-w-md rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 shadow-sm space-y-6">
+            <div class="text-center space-y-2">
+              <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-600 text-white font-bold text-lg">SG</div>
+              <h1 class="text-2xl font-bold">${isRegister ? 'Create your account' : 'Sign in to SpendGuard'}</h1>
+              <p class="text-sm text-slate-500 dark:text-slate-400">Interactive UI Preview • Corporate Expense Governance</p>
+            </div>
+            ${isRegister ? `
+              <form id="register-form" class="space-y-4">
+                <div>
+                  <label class="block text-xs font-medium uppercase text-slate-500 mb-1">Full Name</label>
+                  <input name="name" required placeholder="Jordan Taylor" class="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-sm" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium uppercase text-slate-500 mb-1">Work Email</label>
+                  <input name="email" type="email" required placeholder="jordan@spendguard.io" class="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-sm" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium uppercase text-slate-500 mb-1">Job Title</label>
+                  <input name="jobTitle" placeholder="Product Designer" class="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-sm" />
+                </div>
+                <button type="submit" class="w-full h-10 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium">Create Account</button>
+              </form>
+              <p class="text-center text-sm text-slate-500">Already registered? <button type="button" onclick="nav('login')" class="text-indigo-600 font-medium hover:underline">Sign in</button></p>
+            ` : `
+              <div class="space-y-2">
+                <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">One-Click Role Demo Login</p>
+                ${state.users.map(u => `
+                  <button type="button" onclick="quickLogin('${u.id}')" class="w-full flex items-center justify-between rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                    <div>
+                      <p class="text-sm font-semibold">${esc(u.name)}</p>
+                      <p class="text-xs text-slate-500">${esc(u.email)} • ${esc(u.jobTitle)}</p>
+                    </div>
+                    <span class="rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 px-2.5 py-0.5 text-xs font-medium">${esc(u.role)}</span>
+                  </button>
+                `).join('')}
+              </div>
+              <p class="text-center text-sm text-slate-500">Or <button type="button" onclick="nav('register')" class="text-indigo-600 font-medium hover:underline">register a new Member account</button></p>
+            `}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderDashboard(user) {
+      const isPriv = user.role === 'ADMIN' || user.role === 'MANAGER';
+      const scoped = isPriv ? state.expenses : state.expenses.filter(e => e.userId === user.id);
+
+      let approvedCents = 0, reimbursedCents = 0, pendingCents = 0, pendingCount = 0;
+      const catTotals = { TRAVEL: 0, SOFTWARE: 0, MEALS: 0, EQUIPMENT: 0, OFFICE: 0, OTHER: 0 };
+
+      scoped.forEach(e => {
+        if (e.status === 'APPROVED') approvedCents += e.amountCents;
+        if (e.status === 'REIMBURSED') reimbursedCents += e.amountCents;
+        if (e.status === 'SUBMITTED') { pendingCents += e.amountCents; pendingCount++; }
+        if (e.status === 'APPROVED' || e.status === 'REIMBURSED') {
+          catTotals[e.category] = (catTotals[e.category] || 0) + e.amountCents;
+        }
+      });
+
+      const monthly = [
+        { label: 'Jun', cents: 42000 },
+        { label: 'Jul', cents: 68500 },
+        { label: 'Aug', cents: 54000 },
+        { label: 'Sep', cents: 91200 },
+        { label: 'Oct', cents: 89400 },
+        { label: 'Nov', cents: approvedCents + reimbursedCents }
+      ];
+      const maxM = Math.max(1, ...monthly.map(m => m.cents));
+      const maxCat = Math.max(1, ...Object.values(catTotals));
+
+      return `
+        <div class="space-y-6">
+          <div class="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h1 class="text-2xl font-bold">${isPriv ? 'Organization Spend Overview' : 'My Spend Overview'}</h1>
+              <p class="text-sm text-slate-500 dark:text-slate-400">Real-time approvals, category utilization, and department budgets</p>
+            </div>
+            <button onclick="nav('expenses')" class="inline-flex items-center gap-2 h-10 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium">
+              Manage Expenses &rarr;
+            </button>
+          </div>
+
+          <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm">
+              <p class="text-xs font-medium uppercase text-slate-500">Approved &amp; Paid</p>
+              <p class="mt-2 text-2xl font-bold tabular-nums">${fmtCurrency(approvedCents + reimbursedCents)}</p>
+            </div>
+            <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm">
+              <p class="text-xs font-medium uppercase text-slate-500">Pending Review</p>
+              <p class="mt-2 text-2xl font-bold tabular-nums">${fmtCurrency(pendingCents)}</p>
+              <p class="text-xs text-slate-500 mt-1">${pendingCount} awaiting action</p>
+            </div>
+            <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm">
+              <p class="text-xs font-medium uppercase text-slate-500">Reimbursed</p>
+              <p class="mt-2 text-2xl font-bold tabular-nums">${fmtCurrency(reimbursedCents)}</p>
+            </div>
+            <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm">
+              <p class="text-xs font-medium uppercase text-slate-500">Total Claims</p>
+              <p class="mt-2 text-2xl font-bold tabular-nums">${scoped.length}</p>
+            </div>
+          </div>
+
+          <div class="grid gap-6 lg:grid-cols-3">
+            <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm lg:col-span-2">
+              <h2 class="text-sm font-semibold mb-4">6-Month Approved Spend Trend</h2>
+              <div class="flex items-end gap-3 h-52 pt-4">
+                ${monthly.map(m => {
+                  const pct = Math.max(8, Math.round((m.cents / maxM) * 100));
+                  return `
+                    <div class="flex-1 flex flex-col items-center gap-2 h-full justify-end">
+                      <span class="text-[11px] text-slate-500 tabular-nums">${fmtCurrency(m.cents)}</span>
+                      <div style="height:${pct}%" class="w-full max-w-[44px] rounded-t-lg bg-indigo-600/90 dark:bg-indigo-500"></div>
+                      <span class="text-xs font-medium text-slate-500">${m.label}</span>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+
+            <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm">
+              <h2 class="text-sm font-semibold mb-4">Spend by Category</h2>
+              <div class="space-y-3">
+                ${Object.entries(catTotals).map(([cat, cents]) => {
+                  const pct = Math.round((cents / maxCat) * 100);
+                  return `
+                    <div class="space-y-1">
+                      <div class="flex justify-between text-xs">
+                        <span class="font-medium">${cat}</span>
+                        <span class="tabular-nums text-slate-500">${fmtCurrency(cents)}</span>
+                      </div>
+                      <div class="h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                        <div style="width:${pct}%" class="h-full rounded-full bg-indigo-600"></div>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          </div>
+
+          <div class="grid gap-6 lg:grid-cols-2">
+            <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm">
+              <h2 class="text-sm font-semibold mb-4">Department Monthly Budgets</h2>
+              <div class="space-y-4">
+                ${state.departments.map(d => {
+                  const spent = state.expenses
+                    .filter(e => e.departmentId === d.id && (e.status === 'APPROVED' || e.status === 'REIMBURSED'))
+                    .reduce((acc, e) => acc + e.amountCents, 0);
+                  const util = Math.min(100, Math.round((spent / Math.max(1, d.monthlyBudgetCents)) * 100));
+                  const over = spent > d.monthlyBudgetCents;
+                  return `
+                    <div class="space-y-1.5">
+                      <div class="flex justify-between text-xs">
+                        <span class="font-semibold">${esc(d.name)} (${esc(d.code)})</span>
+                        <span class="tabular-nums text-slate-500">${fmtCurrency(spent)} / ${fmtCurrency(d.monthlyBudgetCents)}</span>
+                      </div>
+                      <div class="h-2.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                        <div style="width:${util}%" class="h-full rounded-full ${over ? 'bg-rose-500' : 'bg-emerald-500'}"></div>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+
+            <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm">
+              <div class="flex items-center justify-between mb-4">
+                <h2 class="text-sm font-semibold">Recent Audit Activity</h2>
+                <button onclick="nav('activity')" class="text-xs text-indigo-600 hover:underline">View all</button>
+              </div>
+              <div class="divide-y divide-slate-100 dark:divide-slate-800">
+                ${state.auditLogs.slice(0, 6).map(l => {
+                  const actor = state.users.find(u => u.id === l.actorId);
+                  return `
+                    <div class="py-2.5 flex items-center justify-between gap-3 text-xs">
+                      <div>
+                        <span class="font-semibold">${esc(l.action)}</span>
+                        <p class="text-slate-500">${esc(actor ? actor.name : 'System')} • ${esc(l.entityType)}</p>
+                      </div>
+                      <span class="text-slate-400 shrink-0">${fmtDateTime(l.createdAt)}</span>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderExpenses(user) {
+      const isPriv = user.role === 'ADMIN' || user.role === 'MANAGER';
+      let list = isPriv ? [...state.expenses] : state.expenses.filter(e => e.userId === user.id);
+
+      const q = state.filters.search.toLowerCase();
+      if (q) list = list.filter(e => e.title.toLowerCase().includes(q) || e.merchant.toLowerCase().includes(q));
+      if (state.filters.status) list = list.filter(e => e.status === state.filters.status);
+      if (state.filters.category) list = list.filter(e => e.category === state.filters.category);
+
+      list.sort((a, b) => {
+        if (state.filters.sortBy === 'amountCents') return b.amountCents - a.amountCents;
+        if (state.filters.sortBy === 'expenseDate') return b.expenseDate.localeCompare(a.expenseDate);
+        return b.createdAt.localeCompare(a.createdAt);
+      });
+
+      return `
+        <div class="space-y-6">
+          <div class="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h1 class="text-2xl font-bold">Expenses</h1>
+              <p class="text-sm text-slate-500">Create claims, attach receipts, and run multi-role approvals</p>
+            </div>
+            <button onclick="openExpenseForm(null)" class="h-10 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium">+ New Expense</button>
+          </div>
+
+          <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <input type="search" placeholder="Search title or merchant..." value="${esc(state.filters.search)}"
+              oninput="state.filters.search=this.value; render()"
+              class="h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-sm" />
+            <select onchange="state.filters.status=this.value; render()" class="h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-sm">
+              <option value="">All Statuses</option>
+              ${['DRAFT','SUBMITTED','APPROVED','REJECTED','REIMBURSED'].map(s => `<option value="${s}" ${state.filters.status===s?'selected':''}>${s}</option>`).join('')}
+            </select>
+            <select onchange="state.filters.category=this.value; render()" class="h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-sm">
+              <option value="">All Categories</option>
+              ${['TRAVEL','SOFTWARE','MEALS','EQUIPMENT','OFFICE','OTHER'].map(c => `<option value="${c}" ${state.filters.category===c?'selected':''}>${c}</option>`).join('')}
+            </select>
+            <select onchange="state.filters.sortBy=this.value; render()" class="h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-sm">
+              <option value="createdAt" ${state.filters.sortBy==='createdAt'?'selected':''}>Sort: Newest Created</option>
+              <option value="expenseDate" ${state.filters.sortBy==='expenseDate'?'selected':''}>Sort: Expense Date</option>
+              <option value="amountCents" ${state.filters.sortBy==='amountCents'?'selected':''}>Sort: Highest Amount</option>
+            </select>
+          </div>
+
+          ${list.length === 0 ? `
+            <div class="rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 py-14 text-center">
+              <p class="text-sm font-semibold">No expenses match your filters</p>
+              <button onclick="openExpenseForm(null)" class="mt-3 h-9 px-4 rounded-xl bg-indigo-600 text-white text-xs font-medium">Create Expense</button>
+            </div>
+          ` : `
+            <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-sm">
+              <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm">
+                  <thead class="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 text-xs uppercase text-slate-500">
+                    <tr>
+                      <th class="px-4 py-3">Claim</th>
+                      <th class="px-4 py-3">Owner / Dept</th>
+                      <th class="px-4 py-3">Date</th>
+                      <th class="px-4 py-3">Amount</th>
+                      <th class="px-4 py-3">Status</th>
+                      <th class="px-4 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+                    ${list.map(exp => {
+                      const owner = state.users.find(u => u.id === exp.userId);
+                      const dept = state.departments.find(d => d.id === exp.departmentId);
+                      const isOwner = exp.userId === user.id;
+                      const canEdit = (isOwner || user.role === 'ADMIN') && (exp.status === 'DRAFT' || exp.status === 'REJECTED');
+                      return `
+                        <tr class="hover:bg-slate-50/70 dark:hover:bg-slate-800/30">
+                          <td class="px-4 py-3">
+                            <p class="font-medium">${esc(exp.title)}</p>
+                            <p class="text-xs text-slate-500">${esc(exp.merchant)} • ${esc(exp.category)} ${exp.attachments.length ? `• 📎 ${exp.attachments.length}` : ''}</p>
+                          </td>
+                          <td class="px-4 py-3 text-xs">
+                            <p class="font-medium">${esc(owner?.name || 'Unknown')}</p>
+                            <p class="text-slate-500">${esc(dept?.code || '—')}</p>
+                          </td>
+                          <td class="px-4 py-3 text-xs text-slate-500">${fmtDate(exp.expenseDate)}</td>
+                          <td class="px-4 py-3 font-semibold tabular-nums">${fmtCurrency(exp.amountCents)}</td>
+                          <td class="px-4 py-3">${statusBadge(exp.status)}</td>
+                          <td class="px-4 py-3 text-right space-x-1 whitespace-nowrap">
+                            <button onclick="openDetail('${exp.id}')" class="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700">Inspect</button>
+                            ${isOwner && (exp.status === 'DRAFT' || exp.status === 'REJECTED') ? `<button onclick="submitExpense('${exp.id}')" class="px-2.5 py-1 rounded-lg text-xs font-medium bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">Submit</button>` : ''}
+                            ${canEdit ? `<button onclick="openExpenseForm('${exp.id}')" class="px-2 py-1 rounded-lg text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800">Edit</button><button onclick="deleteExpense('${exp.id}')" class="px-2 py-1 rounded-lg text-xs text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40">Delete</button>` : ''}
+                          </td>
+                        </tr>
+                      `;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          `}
+        </div>
+      `;
+    }
+
+    function renderActivity(user) {
+      const isAdmin = user.role === 'ADMIN';
+      const scope = isAdmin ? state.filters.auditScope : 'self';
+      let logs = scope === 'all' ? state.auditLogs : state.auditLogs.filter(l => l.actorId === user.id);
+      if (state.filters.auditAction) {
+        const q = state.filters.auditAction.toLowerCase();
+        logs = logs.filter(l => l.action.toLowerCase().includes(q));
+      }
+
+      return `
+        <div class="space-y-6">
+          <div class="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h1 class="text-2xl font-bold">Activity &amp; Audit Trail</h1>
+              <p class="text-sm text-slate-500">Immutable record of authentication and financial workflow events</p>
+            </div>
+            ${isAdmin ? `
+              <div class="flex gap-2">
+                <button onclick="state.filters.auditScope='all'; render()" class="h-9 px-3 rounded-xl text-xs font-medium ${scope==='all'?'bg-indigo-600 text-white':'border border-slate-200 dark:border-slate-700'}">Organization-wide</button>
+                <button onclick="state.filters.auditScope='self'; render()" class="h-9 px-3 rounded-xl text-xs font-medium ${scope==='self'?'bg-indigo-600 text-white':'border border-slate-200 dark:border-slate-700'}">My Actions</button>
+              </div>
+            ` : ''}
+          </div>
+          <div class="max-w-sm">
+            <input placeholder="Filter by action (e.g. EXPENSE_APPROVED)" value="${esc(state.filters.auditAction)}" oninput="state.filters.auditAction=this.value; render()"
+              class="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-sm" />
+          </div>
+          <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-sm">
+            <table class="w-full text-left text-sm">
+              <thead class="bg-slate-50 dark:bg-slate-800/40 text-xs uppercase text-slate-500 border-b border-slate-200 dark:border-slate-800">
+                <tr><th class="px-4 py-3">Action</th><th class="px-4 py-3">Actor</th><th class="px-4 py-3">Target</th><th class="px-4 py-3">Timestamp</th></tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+                ${logs.map(l => {
+                  const actor = state.users.find(u => u.id === l.actorId);
+                  return `
+                    <tr>
+                      <td class="px-4 py-3"><span class="rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 px-2.5 py-0.5 text-xs font-medium">${esc(l.action)}</span></td>
+                      <td class="px-4 py-3 text-xs">${esc(actor ? `${actor.name} (${actor.role})` : 'System')}</td>
+                      <td class="px-4 py-3 text-xs font-mono text-slate-500">${esc(l.entityType)}:${esc(l.entityId)}</td>
+                      <td class="px-4 py-3 text-xs text-slate-500">${fmtDateTime(l.createdAt)}</td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderAdmin(user) {
+      if (user.role !== 'ADMIN') return `<p class="text-sm text-rose-600">Forbidden: Admins only.</p>`;
+      return `
+        <div class="space-y-8">
+          <div>
+            <h1 class="text-2xl font-bold">Admin Console</h1>
+            <p class="text-sm text-slate-500">Manage organization roles, account status, and monthly budgets</p>
+          </div>
+          <div class="grid gap-6 lg:grid-cols-3">
+            <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 lg:col-span-2">
+              <h2 class="text-sm font-semibold mb-4">Departments &amp; Budgets</h2>
+              <div class="divide-y divide-slate-100 dark:divide-slate-800">
+                ${state.departments.map(d => `
+                  <div class="py-3 flex items-center justify-between text-sm">
+                    <div><span class="font-semibold">${esc(d.name)}</span> <span class="ml-1 rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs">${esc(d.code)}</span></div>
+                    <span class="font-semibold tabular-nums">${fmtCurrency(d.monthlyBudgetCents)} / mo</span>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+            <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6">
+              <h2 class="text-sm font-semibold mb-4">Add Department</h2>
+              <form id="dept-form" class="space-y-3">
+                <input name="name" required placeholder="Department Name (e.g. Security)" class="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-sm" />
+                <input name="code" required placeholder="Code (e.g. SEC)" class="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-sm uppercase" />
+                <input name="budget" type="number" required value="10000" min="100" class="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-sm" />
+                <button type="submit" class="w-full h-10 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium">Create Department</button>
+              </form>
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-sm">
+            <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-800 font-semibold text-sm">User Access Management</div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-sm">
+                <thead class="bg-slate-50 dark:bg-slate-800/40 text-xs uppercase text-slate-500">
+                  <tr><th class="px-4 py-3">User</th><th class="px-4 py-3">Role</th><th class="px-4 py-3">Department</th><th class="px-4 py-3">Status</th><th class="px-4 py-3 text-right">Access</th></tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+                  ${state.users.map(u => `
+                    <tr>
+                      <td class="px-4 py-3"><p class="font-medium">${esc(u.name)}</p><p class="text-xs text-slate-500">${esc(u.email)}</p></td>
+                      <td class="px-4 py-3">
+                        <select onchange="adminUpdateUser('${u.id}', { role: this.value })" class="h-9 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 text-xs">
+                          ${['MEMBER','MANAGER','ADMIN'].map(r => `<option value="${r}" ${u.role===r?'selected':''}>${r}</option>`).join('')}
+                        </select>
+                      </td>
+                      <td class="px-4 py-3">
+                        <select onchange="adminUpdateUser('${u.id}', { departmentId: this.value })" class="h-9 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 text-xs">
+                          ${state.departments.map(d => `<option value="${d.id}" ${u.departmentId===d.id?'selected':''}>${esc(d.name)}</option>`).join('')}
+                        </select>
+                      </td>
+                      <td class="px-4 py-3">
+                        <span class="rounded-full px-2.5 py-0.5 text-xs font-medium ${u.isActive?'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300':'bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'}">${u.isActive?'Active':'Suspended'}</span>
+                      </td>
+                      <td class="px-4 py-3 text-right">
+                        <button onclick="adminUpdateUser('${u.id}', { isActive: ${!u.isActive} })" class="h-8 px-3 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium">${u.isActive?'Suspend':'Activate'}</button>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderSettings(user) {
+      return `
+        <div class="space-y-6 max-w-2xl">
+          <div>
+            <h1 class="text-2xl font-bold">Account Settings</h1>
+            <p class="text-sm text-slate-500">Update profile details, theme, and password</p>
+          </div>
+          <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6">
+            <h2 class="text-sm font-semibold mb-4">Profile &amp; Preferences</h2>
+            <form id="profile-form" class="space-y-4">
+              <div><label class="block text-xs font-medium uppercase text-slate-500 mb-1">Email</label><input disabled value="${esc(user.email)}" class="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 px-3 text-sm opacity-75" /></div>
+              <div><label class="block text-xs font-medium uppercase text-slate-500 mb-1">Full Name</label><input name="name" required value="${esc(user.name)}" class="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-sm" /></div>
+              <div><label class="block text-xs font-medium uppercase text-slate-500 mb-1">Job Title</label><input name="jobTitle" required value="${esc(user.jobTitle)}" class="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-sm" /></div>
+              <div>
+                <label class="block text-xs font-medium uppercase text-slate-500 mb-1">Theme</label>
+                <select name="theme" class="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-sm">
+                  <option value="light" ${state.theme==='light'?'selected':''}>Light Mode</option>
+                  <option value="dark" ${state.theme==='dark'?'selected':''}>Dark Mode</option>
+                </select>
+              </div>
+              <button type="submit" class="h-10 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium">Save Profile</button>
+            </form>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderModal(user) {
+      if (!state.modal) return '';
+      if (state.modal.type === 'expenseForm') {
+        const exp = state.modal.expenseId ? state.expenses.find(e => e.id === state.modal.expenseId) : null;
+        return `
+          <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm" onclick="closeModal()">
+            <div class="w-full max-w-lg rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-2xl" onclick="event.stopPropagation()">
+              <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold">${exp ? 'Edit Expense Claim' : 'New Expense Claim'}</h2>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600 text-xl">&times;</button>
+              </div>
+              <form id="expense-form" class="space-y-4">
+                <input type="hidden" name="id" value="${esc(exp?.id || '')}" />
+                <div><label class="block text-xs font-medium uppercase text-slate-500 mb-1">Title</label><input name="title" required value="${esc(exp?.title || '')}" placeholder="Team Offsite Flight" class="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-sm" /></div>
+                <div class="grid gap-3 sm:grid-cols-2">
+                  <div><label class="block text-xs font-medium uppercase text-slate-500 mb-1">Merchant</label><input name="merchant" required value="${esc(exp?.merchant || '')}" placeholder="Delta Air Lines" class="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-sm" /></div>
+                  <div><label class="block text-xs font-medium uppercase text-slate-500 mb-1">Amount (USD)</label><input name="amount" type="number" step="0.01" min="1" required value="${exp ? (exp.amountCents/100).toFixed(2) : ''}" class="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-sm" /></div>
+                </div>
+                <div class="grid gap-3 sm:grid-cols-3">
+                  <div>
+                    <label class="block text-xs font-medium uppercase text-slate-500 mb-1">Category</label>
+                    <select name="category" class="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 text-sm">
+                      ${['TRAVEL','SOFTWARE','MEALS','EQUIPMENT','OFFICE','OTHER'].map(c => `<option value="${c}" ${exp?.category===c?'selected':''}>${c}</option>`).join('')}
+                    </select>
+                  </div>
+                  <div>
+                    <label class="block text-xs font-medium uppercase text-slate-500 mb-1">Department</label>
+                    <select name="departmentId" class="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 text-sm">
+                      ${state.departments.map(d => `<option value="${d.id}" ${(exp?.departmentId || user.departmentId)===d.id?'selected':''}>${esc(d.name)}</option>`).join('')}
+                    </select>
+                  </div>
+                  <div><label class="block text-xs font-medium uppercase text-slate-500 mb-1">Date</label><input name="expenseDate" type="date" required value="${esc(exp?.expenseDate || new Date().toISOString().slice(0,10))}" class="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 text-sm" /></div>
+                </div>
+                <div><label class="block text-xs font-medium uppercase text-slate-500 mb-1">Justification</label><textarea name="description" rows="2" class="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 text-sm">${esc(exp?.description || '')}</textarea></div>
+                <div><label class="block text-xs font-medium uppercase text-slate-500 mb-1">Attach Receipt (Optional)</label><input name="receipt" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" class="text-xs text-slate-500" /></div>
+                <div class="flex justify-end gap-2 pt-2">
+                  <button type="button" onclick="closeModal()" class="h-10 px-4 rounded-xl border border-slate-200 dark:border-slate-700 text-sm">Cancel</button>
+                  <button type="submit" class="h-10 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium">Save Draft</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        `;
+      }
+
+      if (state.modal.type === 'expenseDetail') {
+        const exp = state.expenses.find(e => e.id === state.modal.expenseId);
+        if (!exp) return '';
+        const owner = state.users.find(u => u.id === exp.userId);
+        const dept = state.departments.find(d => d.id === exp.departmentId);
+        const isPriv = user.role === 'ADMIN' || user.role === 'MANAGER';
+
+        return `
+          <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm" onclick="closeModal()">
+            <div class="w-full max-w-lg rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-2xl space-y-4" onclick="event.stopPropagation()">
+              <div class="flex items-start justify-between gap-2">
+                <div>
+                  <h2 class="text-lg font-semibold">${esc(exp.title)}</h2>
+                  <p class="text-xs text-slate-500">${esc(exp.merchant)} • Submitted by ${esc(owner?.name || '')}</p>
+                </div>
+                ${statusBadge(exp.status)}
+              </div>
+              <div class="grid grid-cols-2 gap-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 p-3 text-xs">
+                <div><span class="text-slate-500">Amount</span><p class="font-bold text-base tabular-nums">${fmtCurrency(exp.amountCents)}</p></div>
+                <div><span class="text-slate-500">Date &amp; Dept</span><p class="font-medium">${fmtDate(exp.expenseDate)} • ${esc(dept?.name || '')}</p></div>
+              </div>
+              ${exp.description ? `<p class="text-xs text-slate-600 dark:text-slate-300">${esc(exp.description)}</p>` : ''}
+              ${exp.reviewNote ? `<div class="rounded-xl border border-slate-200 dark:border-slate-700 p-3 text-xs"><strong>Reviewer Note:</strong> ${esc(exp.reviewNote)}</div>` : ''}
+              <div class="space-y-1.5">
+                <p class="text-xs font-semibold uppercase text-slate-500">Receipts</p>
+                ${exp.attachments.length === 0 ? `<p class="text-xs text-slate-400">No receipts uploaded.</p>` : exp.attachments.map(a => `
+                  <div class="flex items-center justify-between rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2 text-xs">
+                    <span class="font-medium text-indigo-600">📎 ${esc(a.name)}</span>
+                    <span class="text-slate-400">${Math.max(1, Math.round(a.sizeBytes/1024))} KB</span>
+                  </div>
+                `).join('')}
+              </div>
+              ${isPriv && (exp.status === 'SUBMITTED' || exp.status === 'APPROVED') ? `
+                <div class="border-t border-slate-200 dark:border-slate-800 pt-4 space-y-3">
+                  <div>
+                    <label class="block text-xs font-medium uppercase text-slate-500 mb-1">Review Note (required when rejecting)</label>
+                    <input id="review-note-input" placeholder="Approved for Q4 budget..." class="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-sm" />
+                  </div>
+                  <div class="flex justify-end gap-2">
+                    ${exp.status === 'SUBMITTED' ? `
+                      <button onclick="reviewExpense('${exp.id}', 'REJECT')" class="h-9 px-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-medium">Reject</button>
+                      <button onclick="reviewExpense('${exp.id}', 'APPROVE')" class="h-9 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium">Approve</button>
+                    ` : `
+                      <button onclick="reviewExpense('${exp.id}', 'REIMBURSE')" class="h-9 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium">Mark Reimbursed</button>
+                    `}
+                  </div>
+                </div>
+              ` : ''}
+            </div>
+          </div>
+        `;
+      }
+      return '';
+    }
+
+    function render() {
+      applyTheme();
+      const root = document.getElementById('app');
+      const user = currentUser();
+
+      if (!user || state.view === 'login' || state.view === 'register') {
+        root.innerHTML = renderAuth();
+        wireEvents();
+        return;
+      }
+
+      const dept = state.departments.find(d => d.id === user.departmentId);
+      const userNotifs = state.notifications.filter(n => n.userId === user.id);
+      const unreadCount = userNotifs.filter(n => !n.isRead).length;
+
+      const navItems = [
+        { id: 'dashboard', label: 'Dashboard' },
+        { id: 'expenses', label: 'Expenses' },
+        { id: 'activity', label: 'Activity Log' },
+        ...(user.role === 'ADMIN' ? [{ id: 'admin', label: 'Admin Console' }] : []),
+        { id: 'settings', label: 'Settings' }
+      ];
+
+      const sidebarBody = `
+        <div class="flex h-full flex-col justify-between p-4">
+          <div class="space-y-6">
+            <div class="flex items-center gap-2.5 px-2">
+              <div class="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-600 text-white font-bold">SG</div>
+              <div>
+                <p class="text-sm font-bold">SpendGuard</p>
+                <p class="text-[11px] text-slate-500">Interactive Preview</p>
+              </div>
+            </div>
+            <nav class="space-y-1">
+              ${navItems.map(item => `
+                <button onclick="nav('${item.id}')" class="w-full text-left flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${state.view === item.id ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800/70'}">
+                  ${esc(item.label)}
+                </button>
+              `).join('')}
+            </nav>
+          </div>
+
+          <div class="border-t border-slate-200 dark:border-slate-800 pt-4 space-y-3">
+            <div class="px-2">
+              <p class="text-sm font-medium truncate">${esc(user.name)}</p>
+              <p class="text-xs text-slate-500 truncate">${esc(user.email)}</p>
+              <div class="mt-2">
+                <label class="block text-[10px] uppercase font-semibold text-slate-400 mb-1">Switch Sandbox Role</label>
+                <select onchange="switchUser(this.value)" class="w-full h-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 text-xs">
+                  ${state.users.map(u => `<option value="${u.id}" ${u.id===user.id?'selected':''}>${esc(u.name)} (${u.role})</option>`).join('')}
+                </select>
+              </div>
+            </div>
+            <button onclick="logout()" class="w-full text-left rounded-xl px-3 py-2 text-sm font-medium text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40">Sign Out</button>
+          </div>
+        </div>
+      `;
+
+      let mainHtml = '';
+      if (state.view === 'dashboard') mainHtml = renderDashboard(user);
+      else if (state.view === 'expenses') mainHtml = renderExpenses(user);
+      else if (state.view === 'activity') mainHtml = renderActivity(user);
+      else if (state.view === 'admin') mainHtml = renderAdmin(user);
+      else if (state.view === 'settings') mainHtml = renderSettings(user);
+
+      root.innerHTML = `
+        <div class="min-h-screen flex">
+          <aside class="hidden lg:block w-64 shrink-0 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+            ${sidebarBody}
+          </aside>
+
+          ${state.mobileMenuOpen ? `
+            <div class="fixed inset-0 z-50 lg:hidden flex">
+              <div class="fixed inset-0 bg-slate-950/50" onclick="state.mobileMenuOpen=false; render()"></div>
+              <aside class="relative z-10 w-64 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800">
+                ${sidebarBody}
+              </aside>
+            </div>
+          ` : ''}
+
+          <div class="flex-1 flex flex-col min-w-0">
+            <header class="sticky top-0 z-30 h-16 border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md px-4 lg:px-8 flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <button onclick="state.mobileMenuOpen=true; render()" class="lg:hidden rounded-lg p-2 border border-slate-200 dark:border-slate-700 text-xs">Menu</button>
+                <span class="text-sm font-medium text-slate-500">${esc(dept ? dept.name + ' Workspace' : 'Corporate Workspace')}</span>
+              </div>
+              <div class="flex items-center gap-2 relative">
+                <button onclick="toggleTheme()" class="rounded-xl px-3 py-1.5 border border-slate-200 dark:border-slate-700 text-xs font-medium hover:bg-slate-100 dark:hover:bg-slate-800">
+                  ${state.theme === 'dark' ? '☀️ Light' : '🌙 Dark'}
+                </button>
+                <button onclick="state.notifOpen=!state.notifOpen; render()" class="relative rounded-xl px-3 py-1.5 border border-slate-200 dark:border-slate-700 text-xs font-medium hover:bg-slate-100 dark:hover:bg-slate-800">
+                  🔔 ${unreadCount > 0 ? `<span class="ml-1 inline-flex items-center justify-center rounded-full bg-indigo-600 text-white px-1.5 text-[10px]">${unreadCount}</span>` : ''}
+                </button>
+                ${state.notifOpen ? `
+                  <div class="absolute right-0 top-11 w-80 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl p-3 z-50">
+                    <div class="flex items-center justify-between pb-2 mb-2 border-b border-slate-100 dark:border-slate-800">
+                      <span class="text-xs font-semibold uppercase text-slate-500">Notifications (${unreadCount})</span>
+                      ${unreadCount > 0 ? `<button onclick="markAllRead()" class="text-xs text-indigo-600 hover:underline">Mark all read</button>` : ''}
+                    </div>
+                    <div class="max-h-64 overflow-y-auto space-y-2">
+                      ${userNotifs.length === 0 ? `<p class="py-4 text-center text-xs text-slate-400">You are all caught up.</p>` : userNotifs.map(n => `
+                        <div class="rounded-xl p-2.5 text-xs ${n.isRead ? 'text-slate-500' : 'bg-indigo-50 dark:bg-indigo-950/40'}">
+                          <p class="font-semibold">${esc(n.title)}</p>
+                          <p class="mt-0.5">${esc(n.message)}</p>
+                        </div>
+                      `).join('')}
+                    </div>
+                  </div>
+                ` : ''}
+              </div>
+            </header>
+            <main class="flex-1 p-4 lg:p-8 max-w-7xl w-full mx-auto">${mainHtml}</main>
+          </div>
+        </div>
+        ${renderModal(user)}
+      `;
+      wireEvents();
+    }
+
+    // ---------- ACTIONS & EVENT BINDINGS ----------
+    function nav(view) {
+      state.view = view;
+      state.mobileMenuOpen = false;
+      state.notifOpen = false;
+      render();
+    }
+
+    function toggleTheme() {
+      state.theme = state.theme === 'dark' ? 'light' : 'dark';
+      render();
+    }
+
+    function switchUser(id) {
+      const target = state.users.find(u => u.id === id);
+      if (!target || !target.isActive) {
+        toast('Account is suspended.', 'error');
+        render();
+        return;
+      }
+      state.currentUserId = id;
+      if (state.view === 'admin' && target.role !== 'ADMIN') state.view = 'dashboard';
+      toast(`Switched to ${target.name} (${target.role})`, 'info');
+      render();
+    }
+
+    function quickLogin(id) {
+      state.currentUserId = id;
+      state.view = 'dashboard';
+      addAudit('USER_LOGIN', 'User', id);
+      toast(`Signed in as ${currentUser().name}`, 'success');
+      render();
+    }
+
+    function logout() {
+      addAudit('USER_LOGOUT', 'User', state.currentUserId);
+      state.currentUserId = null;
+      state.view = 'login';
+      toast('Signed out safely.', 'info');
+      render();
+    }
+
+    function markAllRead() {
+      const u = currentUser();
+      state.notifications.forEach(n => { if (n.userId === u.id) n.isRead = true; });
+      render();
+    }
+
+    function openExpenseForm(expenseId) {
+      state.modal = { type: 'expenseForm', expenseId };
+      render();
+    }
+
+    function openDetail(expenseId) {
+      state.modal = { type: 'expenseDetail', expenseId };
+      render();
+    }
+
+    function closeModal() {
+      state.modal = null;
+      render();
+    }
+
+    function submitExpense(id) {
+      const exp = state.expenses.find(e => e.id === id);
+      const u = currentUser();
+      if (!exp || exp.userId !== u.id) return;
+      exp.status = 'SUBMITTED';
+      exp.reviewNote = null;
+      state.users.filter(x => x.isActive && (x.role === 'MANAGER' || x.role === 'ADMIN') && x.id !== u.id)
+        .forEach(a => notifyUser(a.id, 'Expense Submitted for Review', `${u.name} submitted "${exp.title}" (${fmtCurrency(exp.amountCents)}).`));
+      addAudit('EXPENSE_SUBMITTED', 'Expense', id);
+      toast('Expense submitted for approval.', 'success');
+      render();
+    }
+
+    function deleteExpense(id) {
+      state.expenses = state.expenses.filter(e => e.id !== id);
+      addAudit('EXPENSE_DELETED', 'Expense', id);
+      toast('Expense deleted.', 'info');
+      render();
+    }
+
+    function reviewExpense(id, decision) {
+      const u = currentUser();
+      const exp = state.expenses.find(e => e.id === id);
+      if (!exp) return;
+      if (exp.userId === u.id && u.role !== 'ADMIN') {
+        toast('Managers cannot approve or reject their own expenses (Segregation of Duties).', 'error');
+        return;
+      }
+      const note = (document.getElementById('review-note-input')?.value || '').trim();
+      if (decision === 'REJECT' && note.length < 5) {
+        toast('A rejection note of at least 5 characters is required.', 'error');
+        return;
+      }
+      exp.status = decision === 'APPROVE' ? 'APPROVED' : decision === 'REJECT' ? 'REJECTED' : 'REIMBURSED';
+      if (note) exp.reviewNote = note;
+      notifyUser(exp.userId, `Expense ${exp.status.toLowerCase()}`, `Your claim "${exp.title}" was marked ${exp.status} by ${u.name}.`);
+      addAudit(`EXPENSE_${exp.status}`, 'Expense', id);
+      toast(`Expense ${exp.status.toLowerCase()}.`, 'success');
+      closeModal();
+    }
+
+    function adminUpdateUser(id, patch) {
+      const target = state.users.find(u => u.id === id);
+      if (!target) return;
+      if (id === state.currentUserId && patch.isActive === false) {
+        toast('You cannot suspend your own Admin account.', 'error');
+        return;
+      }
+      Object.assign(target, patch);
+      addAudit('ADMIN_USER_UPDATED', 'User', id);
+      toast('User access updated.', 'success');
+      render();
+    }
+
+    function wireEvents() {
+      const regForm = document.getElementById('register-form');
+      if (regForm) {
+        regForm.onsubmit = (e) => {
+          e.preventDefault();
+          const fd = new FormData(regForm);
+          const newUser = {
+            id: uid('u'),
+            name: fd.get('name').toString().trim(),
+            email: fd.get('email').toString().trim().toLowerCase(),
+            role: 'MEMBER',
+            jobTitle: fd.get('jobTitle').toString().trim() || 'Team Member',
+            departmentId: state.departments[0].id,
+            isActive: true
+          };
+          state.users.push(newUser);
+          state.currentUserId = newUser.id;
+          state.view = 'dashboard';
+          addAudit('USER_REGISTERED', 'User', newUser.id);
+          toast(`Welcome to SpendGuard, ${newUser.name}!`, 'success');
+          render();
+        };
+      }
+
+      const expForm = document.getElementById('expense-form');
+      if (expForm) {
+        expForm.onsubmit = (e) => {
+          e.preventDefault();
+          const fd = new FormData(expForm);
+          const id = fd.get('id').toString();
+          const amountCents = Math.round(parseFloat(fd.get('amount')) * 100);
+          const file = fd.get('receipt');
+          const att = file && file.size > 0 ? [{ id: uid('att'), name: file.name, sizeBytes: file.size }] : [];
+
+          if (id) {
+            const exp = state.expenses.find(x => x.id === id);
+            Object.assign(exp, {
+              title: fd.get('title').toString().trim(),
+              merchant: fd.get('merchant').toString().trim(),
+              amountCents,
+              category: fd.get('category').toString(),
+              departmentId: fd.get('departmentId').toString(),
+              expenseDate: fd.get('expenseDate').toString(),
+              description: fd.get('description').toString().trim(),
+              status: 'DRAFT'
+            });
+            if (att.length) exp.attachments.push(...att);
+            addAudit('EXPENSE_UPDATED', 'Expense', id);
+            toast('Expense updated.', 'success');
+          } else {
+            const newId = uid('exp');
+            state.expenses.unshift({
+              id: newId,
+              title: fd.get('title').toString().trim(),
+              merchant: fd.get('merchant').toString().trim(),
+              description: fd.get('description').toString().trim(),
+              amountCents,
+              currency: 'USD',
+              category: fd.get('category').toString(),
+              status: 'DRAFT',
+              expenseDate: fd.get('expenseDate').toString(),
+              userId: currentUser().id,
+              departmentId: fd.get('departmentId').toString(),
+              reviewNote: null,
+              attachments: att,
+              createdAt: new Date().toISOString()
+            });
+            addAudit('EXPENSE_CREATED', 'Expense', newId);
+            toast('Draft expense created.', 'success');
+          }
+          closeModal();
+        };
+      }
+
+      const deptForm = document.getElementById('dept-form');
+      if (deptForm) {
+        deptForm.onsubmit = (e) => {
+          e.preventDefault();
+          const fd = new FormData(deptForm);
+          const newDept = {
+            id: uid('d'),
+            name: fd.get('name').toString().trim(),
+            code: fd.get('code').toString().trim().toUpperCase(),
+            monthlyBudgetCents: Math.round(parseFloat(fd.get('budget')) * 100)
+          };
+          state.departments.push(newDept);
+          addAudit('DEPARTMENT_CREATED', 'Department', newDept.id);
+          toast('Department created.', 'success');
+          render();
+        };
+      }
+
+      const profForm = document.getElementById('profile-form');
+      if (profForm) {
+        profForm.onsubmit = (e) => {
+          e.preventDefault();
+          const fd = new FormData(profForm);
+          const u = currentUser();
+          u.name = fd.get('name').toString().trim();
+          u.jobTitle = fd.get('jobTitle').toString().trim();
+          state.theme = fd.get('theme').toString();
+          addAudit('PROFILE_UPDATED', 'User', u.id);
+          toast('Profile settings saved.', 'success');
+          render();
+        };
+      }
+    }
+
+    render();
+  </script>
+</body>
+</html>
